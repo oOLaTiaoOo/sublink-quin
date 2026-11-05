@@ -743,7 +743,25 @@ export const Form = (props) => {
                     <i class="fas fa-anchor text-gray-400"></i>
                     订阅链接
                   </h3>
-                  <span class="text-[9px] font-mono text-gray-400 truncate max-w-40" x-text="subscriptionToken"></span>
+                </div>
+                <div class="mb-4 space-y-2">
+                  <label for="subscription-link-token" class="block text-xs font-semibold text-gray-700 dark:text-gray-200 font-pixel">自定义链接标识</label>
+                  <input
+                    id="subscription-link-token"
+                    type="text"
+                    x-model="subscriptionTokenInput"
+                    x-bind:disabled="savingSubscription"
+                    maxlength="64"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="例如 my-subscription"
+                    aria-describedby="subscription-token-help"
+                    class="nes-input w-full px-3 py-2 font-mono text-xs text-[#2c2523] dark:text-[#f7f5f0]"
+                  />
+                  <p id="subscription-token-help" class="text-xs text-gray-500 dark:text-gray-400">3–64 位字母、数字、下划线或短横线，以字母或数字开头，区分大小写。留空时，新订阅自动生成，已有订阅保留原标识。</p>
+                  <p x-cloak x-show="subscriptionToken && subscriptionTokenInput.trim() && subscriptionTokenInput.trim() !== subscriptionToken" class="text-xs text-amber-700 dark:text-amber-400">更新订阅后新标识生效，旧链接将失效，请同步更新客户端。</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">持有链接即可下载订阅，请避免使用容易猜到的标识。</p>
+                  <p x-cloak x-show="subscriptionMessage" x-text="subscriptionMessage" role="status" class="text-xs text-gray-700 dark:text-gray-200"></p>
                 </div>
                 <div x-show="!stableLinks" class="border-2 border-dashed border-gray-300 dark:border-gray-700 py-6 text-center text-xs text-gray-500 dark:text-gray-400 font-pixel">
                   保存订阅后在这里复制客户端链接

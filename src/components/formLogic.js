@@ -89,6 +89,7 @@ export const formLogicFn = (t) => {
             subscriptionMessage: '',
             activeSubscriptionId: '',
             subscriptionToken: '',
+            subscriptionTokenInput: '',
             stableLinks: null,
             savingSubscription: false,
             sources: [],
@@ -481,6 +482,7 @@ export const formLogicFn = (t) => {
                 this.activeSubscriptionId = '';
                 this.editSubscriptionId = '';
                 this.subscriptionToken = '';
+                this.subscriptionTokenInput = '';
                 this.stableLinks = null;
                 this.subscriptionName = '';
                 this.sources = [this.createEmptySource(0)];
@@ -561,6 +563,7 @@ export const formLogicFn = (t) => {
                 this.subscriptions = [];
                 this.activeSubscriptionId = '';
                 this.subscriptionToken = '';
+                this.subscriptionTokenInput = '';
                 this.stableLinks = null;
             },
 
@@ -633,6 +636,7 @@ export const formLogicFn = (t) => {
                 this.syncInputFromSources();
                 return {
                     ownerToken: this.ownerToken,
+                    token: this.subscriptionTokenInput.trim(),
                     name: (this.subscriptionName || '').trim() || `我的订阅 ${new Date().toLocaleDateString()}`,
                     sources: this.sources.map((source, index) => ({
                         id: source.id,
@@ -695,6 +699,7 @@ export const formLogicFn = (t) => {
                     const subscription = data.subscription;
                     this.activeSubscriptionId = subscription.id;
                     this.subscriptionToken = subscription.token;
+                    this.subscriptionTokenInput = subscription.token;
                     this.subscriptionName = subscription.name || '';
                     this.sources = this.loadSavedSources('');
                     if (Array.isArray(subscription.sources) && subscription.sources.length > 0) {
@@ -736,6 +741,7 @@ export const formLogicFn = (t) => {
             },
 
             async saveSubscription() {
+                if (this.savingSubscription) return;
                 if (!this.currentUser) {
                     this.subscriptionMessage = '请先登录后再保存订阅';
                     return;
@@ -756,6 +762,7 @@ export const formLogicFn = (t) => {
                     const subscription = data.subscription;
                     this.activeSubscriptionId = subscription.id;
                     this.subscriptionToken = subscription.token;
+                    this.subscriptionTokenInput = subscription.token;
                     this.subscriptionName = subscription.name;
                     this.stableLinks = this.buildStableLinks(subscription.token);
                     this.subscriptionMessage = isUpdate ? '订阅已更新' : '订阅已保存';
@@ -765,6 +772,7 @@ export const formLogicFn = (t) => {
                 } catch (error) {
                     console.error('Failed to save subscription:', error);
                     this.subscriptionMessage = `保存订阅失败：${error?.message || 'Unknown error'}`;
+                    this.showToast(this.subscriptionMessage, 'error');
                 } finally {
                     this.savingSubscription = false;
                 }

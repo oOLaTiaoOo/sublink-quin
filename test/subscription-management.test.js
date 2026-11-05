@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createApp } from '../src/app/createApp.jsx';
 import { MemoryKVAdapter } from '../src/adapters/kv/memoryKv.js';
 import { decodeBase64 } from '../src/utils.js';
+import yaml from 'js-yaml';
 
 const VMESS = 'vmess://ew0KICAidiI6ICIyIiwNCiAgInBzIjogInRlc3QiLA0KICAiYWRkIjogIjEuMS4xLjEiLA0KICAicG9ydCI6ICI0NDMiLA0KICAiaWQiOiAiYWRkNjY2NjYtODg4OC04ODg4LTg4ODgtODg4ODg4ODg4ODg4IiwNCiAgImFpZCI6ICIwIiwNCiAgInNjeSI6ICJhdXRvIiwNCiAgIm5ldCI6ICJ3cyIsDQogICJ0eXBlIjogIm5vbmUiLA0KICAiaG9zdCI6ICIiLA0KICAicGF0aCI6ICIvIiwNCiAgInRscyI6ICJ0bHMiDQp9';
 
@@ -53,6 +54,104 @@ async function registerAndGetCookie(app, username = 'alice') {
 }
 
 describe('Subscription management API', () => {
+    it('supports custom tokens across all clients, renames, and deletion', async () => {
+        const app = createTestApp();
+        const cookie = await registerAndGetCookie(app);
+        const headers = { 'Content-Type': 'application/json', Cookie: cookie };
+        const createdResponse = await app.request('/api/subscriptions', {
+            method: 'POST', headers,
+            body: JSON.stringify(createSubscriptionPayload({ token: '  My-sub_123  ' }))
+        });
+        expect(createdResponse.status).toBe(201);
+        const created = (await createdResponse.json()).subscription;
+        expect(created.token).toBe('My-sub_123');
+
+        const checkDownloads = async (token) => {
+            for (const target of ['xray', 'singbox', 'clash', 'surge']) {
+                const response = await app.request(`/sub/${token}/${target}`);
+                expect(response.status).toBe(200);
+                const content = await response.text();
+                if (target === 'xray') expect(decodeBase64(content)).toBe(VMESS);
+                if (target === 'singbox') expect(JSON.parse(content).outbounds).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'vmess', tag: 'test' })]));
+                if (target === 'clash') expect(yaml.load(content).proxies).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'vmess', name: 'test' })]));
+                if (target === 'surge') {
+                    expect(content).toContain('[Proxy]');
+                    expect(content).toContain('test = vmess,');
+                }
+            }
+        };
+        await checkDownloads(created.token);
+
+        for (const token of [undefined, '', created.token]) {
+            const response = await app.request(`/api/subscriptions/${created.id}`, {
+                method: 'PUT', headers, body: JSON.stringify({ token, name: 'Updated' })
+            });
+            expect(response.status).toBe(200);
+            expect((await response.json()).subscription.token).toBe(created.token);
+        }
+
+        const renamedResponse = await app.request(`/api/subscriptions/${created.id}`, {
+            method: 'PUT', headers, body: JSON.stringify({ token: 'New-sub_456' })
+        });
+        expect(renamedResponse.status).toBe(200);
+        const renamed = (await renamedResponse.json()).subscription;
+        expect(renamed.token).toBe('New-sub_456');
+        await checkDownloads(renamed.token);
+        for (const target of ['xray', 'singbox', 'clash', 'surge']) {
+            expect((await app.request(`/sub/${created.token}/${target}`)).status).toBe(404);
+        }
+        const list = await (await app.request('/api/subscriptions', { headers })).json();
+        expect(list.subscriptions[0].token).toBe(renamed.token);
+        const loaded = await (await app.request(`/api/subscriptions/${created.id}`, { headers })).json();
+        expect(loaded.subscription.token).toBe(renamed.token);
+
+        expect((await app.request(`/api/subscriptions/${created.id}`, { method: 'DELETE', headers })).status).toBe(200);
+        expect((await app.request(`/sub/${renamed.token}/clash`)).status).toBe(404);
+        const reused = await app.request('/api/subscriptions', {
+            method: 'POST', headers,
+            body: JSON.stringify(createSubscriptionPayload({ token: renamed.token }))
+        });
+        expect(reused.status).toBe(201);
+    });
+
+    it('rejects invalid and occupied tokens without changing existing links', async () => {
+        const app = createTestApp();
+        const cookie = await registerAndGetCookie(app);
+        const otherCookie = await registerAndGetCookie(app, 'bob');
+        const headers = { 'Content-Type': 'application/json', Cookie: cookie };
+        const otherHeaders = { ...headers, Cookie: otherCookie };
+        const create = (token, requestHeaders = headers) => app.request('/api/subscriptions', {
+            method: 'POST', headers: requestHeaders,
+            body: JSON.stringify(createSubscriptionPayload({ token }))
+        });
+        const first = (await (await create('reserved-token')).json()).subscription;
+        const second = (await (await create('', otherHeaders)).json()).subscription;
+        expect(second.token).toMatch(/^[A-Za-z0-9]{24}$/);
+        for (const requestHeaders of [headers, otherHeaders]) {
+            expect((await create(first.token, requestHeaders)).status).toBe(409);
+        }
+        for (const token of ['ab', 'a'.repeat(65), 'bad/path', 'bad?query', 'bad#hash', 'bad%2Fpath', 'bad token', '_bad', '中文标识', null, 123, {}, []]) {
+            expect((await create(token)).status).toBe(400);
+            const update = await app.request(`/api/subscriptions/${second.id}`, {
+                method: 'PUT', headers: otherHeaders, body: JSON.stringify({ token })
+            });
+            expect(update.status).toBe(400);
+        }
+        const collision = await app.request(`/api/subscriptions/${second.id}`, {
+            method: 'PUT', headers: otherHeaders, body: JSON.stringify({ token: first.token })
+        });
+        expect(collision.status).toBe(409);
+        const unauthorized = await app.request(`/api/subscriptions/${first.id}`, {
+            method: 'PUT', headers: otherHeaders, body: JSON.stringify({ token: 'stolen-token' })
+        });
+        expect(unauthorized.status).toBe(404);
+        for (const subscription of [first, second]) {
+            expect((await app.request(`/sub/${subscription.token}/clash`)).status).toBe(200);
+        }
+        expect((await app.request('/sub/stolen-token/clash')).status).toBe(404);
+        expect((await (await app.request('/api/subscriptions', { headers })).json()).subscriptions).toHaveLength(1);
+    });
+
     it('parses a source into manageable nodes', async () => {
         const app = createTestApp();
 

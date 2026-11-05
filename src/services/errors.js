@@ -20,6 +20,13 @@ export class InvalidPayloadError extends ServiceError {
     }
 }
 
+export class ConflictError extends ServiceError {
+    constructor(message = 'Resource already exists') {
+        super(message, 409);
+        this.name = 'ConflictError';
+    }
+}
+
 export class InvalidConfigError extends ServiceError {
     constructor(message = 'Invalid config') {
         super(message, 400);

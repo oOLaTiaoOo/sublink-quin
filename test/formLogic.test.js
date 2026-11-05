@@ -1,7 +1,46 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { formLogicFn } from '../src/components/formLogic.js';
 
 describe('formLogic toString fix', () => {
+  it('keeps published links until a custom token is saved successfully', async () => {
+    const fakeWindow = { APP_TRANSLATIONS: {}, PREDEFINED_RULE_SETS: {}, location: { origin: 'http://localhost' } };
+    const fetchMock = vi.fn();
+    const fn = new Function('window', 'fetch', '(' + formLogicFn.toString() + ')(); return window.formData();');
+    const data = fn(fakeWindow, fetchMock);
+    data.currentUser = { id: 'user-1' };
+    data.activeSubscriptionId = 'sub_1';
+    data.subscriptionToken = 'old-token';
+    data.subscriptionTokenInput = '  new-token  ';
+    data.stableLinks = data.buildStableLinks('old-token');
+    data.syncInputFromSources = () => {};
+    data.getCustomRulesPayload = () => [];
+    data.getBaseConfigPayload = () => null;
+    data.generatePreview = () => {};
+    data.loadSubscriptions = async () => {};
+    data.showToast = vi.fn();
+    const oldLinks = { ...data.stableLinks };
+    fetchMock.mockResolvedValueOnce(new Response('订阅链接标识已被使用，请换一个', { status: 409 }));
+    await data.saveSubscription();
+    expect(data.stableLinks).toEqual(oldLinks);
+    expect(data.subscriptionToken).toBe('old-token');
+    expect(data.subscriptionTokenInput).toBe('  new-token  ');
+    expect(data.subscriptionMessage).toContain('已被使用');
+    expect(data.savingSubscription).toBe(false);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).token).toBe('new-token');
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ subscription: { id: 'sub_1', token: 'new-token', name: 'Updated' } })));
+    await data.saveSubscription();
+    expect(data.subscriptionTokenInput).toBe('new-token');
+    expect(data.subscriptionToken).toBe('new-token');
+    for (const target of ['xray', 'singbox', 'clash', 'surge']) {
+      expect(data.stableLinks[target]).toBe(`http://localhost/sub/new-token/${target}`);
+    }
+    data.createEmptySource = () => ({});
+    data.resetSubscriptionDraft();
+    expect(data.subscriptionTokenInput).toBe('');
+    expect(data.stableLinks).toBeNull();
+  });
+
   it('includes parseSurgeConfigInput definition in toString output', () => {
     const fnString = formLogicFn.toString();
 
